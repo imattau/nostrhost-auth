@@ -137,3 +137,16 @@ def test_legacy_users_table_is_migrated_once(tmp_path):
     store.link("matt", PUBKEY_B)
     reopened = MappingStore(db_path)
     assert [identity.pubkey for identity in reopened.list_by_username("matt")] == [PUBKEY_B]
+
+
+def test_set_identity_enabled_reenables(tmp_path):
+    store = MappingStore(tmp_path / "mappings.db")
+    identity = store.add_identity("alice", "f" * 64, signer_type="nip07")
+    assert store.revoke_identity(identity.identity_id, "alice")
+    # disabled identity is not resolvable
+    assert store.get_by_pubkey("f" * 64) is None
+    # but the projector can re-enable it
+    assert store.set_identity_enabled(identity.identity_id, "alice", True)
+    assert store.get_by_pubkey("f" * 64) is not None
+    # and look it up regardless of state
+    assert store.get_identity_by_pubkey("f" * 64) is not None

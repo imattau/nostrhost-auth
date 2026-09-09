@@ -193,6 +193,42 @@ class MappingStore:
             conn.commit()
             return cursor.rowcount == 1
 
+    def set_identity_enabled(self, identity_id: int, ynh_username: str, enabled: bool) -> bool:
+        """Enable or re-enable one identity (used by the identity projector
+        to materialise an identity-definition event's `enabled` state). Only
+        touches identities belonging to `ynh_username`."""
+        with closing(self._connect()) as conn:
+            if enabled:
+                cursor = conn.execute(
+                    """
+                    UPDATE identities
+                    SET enabled = 1, revoked_at = NULL
+                    WHERE identity_id = ? AND ynh_username = ?
+                    """,
+                    (identity_id, ynh_username),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    UPDATE identities
+                    SET enabled = 0, revoked_at = ?
+                    WHERE identity_id = ? AND ynh_username = ? AND enabled = 1
+                    """,
+                    (int(time.time()), identity_id, ynh_username),
+                )
+            conn.commit()
+            return cursor.rowcount == 1
+
+    def get_identity_by_pubkey(self, pubkey_hex: str) -> Identity | None:
+        """Like :meth:`get_by_pubkey` but ignores the enabled flag — lets the
+        identity projector re-enable a revoked identity rather than creating
+        a duplicate row."""
+        with closing(self._connect()) as conn:
+            row = conn.execute(
+                "SELECT * FROM identities WHERE pubkey = ?", (pubkey_hex,)
+            ).fetchone()
+            return self._row_to_identity(row) if row else None
+
     def update_identity_label(
         self, identity_id: int, ynh_username: str, label: str | None
     ) -> Identity | None:
