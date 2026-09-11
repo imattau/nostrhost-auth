@@ -247,6 +247,35 @@ class MappingStore:
                 return None
         return self.get_by_id(identity_id)
 
+    def update_identity_profile(
+        self,
+        identity_id: int,
+        ynh_username: str,
+        *,
+        signer_type: str,
+        label: str | None,
+    ) -> Identity | None:
+        """Update an active identity's signer_type and display label together.
+
+        Used by the identity projector when a re-published identity-definition
+        event (same ``d`` tag / pubkey, still enabled) carries a new
+        signer_type or label — the row is already materialised, so the event
+        updates the profile in place rather than creating a duplicate.
+        """
+        with closing(self._connect()) as conn:
+            cursor = conn.execute(
+                """
+                UPDATE identities
+                SET signer_type = ?, label = ?
+                WHERE identity_id = ? AND ynh_username = ? AND enabled = 1
+                """,
+                (signer_type, label, identity_id, ynh_username),
+            )
+            conn.commit()
+            if cursor.rowcount != 1:
+                return None
+        return self.get_by_id(identity_id)
+
     def get_by_id(self, identity_id: int) -> Identity | None:
         with closing(self._connect()) as conn:
             row = conn.execute(

@@ -112,6 +112,23 @@ def test_active_identity_label_can_be_updated_without_changing_pubkey(store):
     assert store.update_identity_label(identity.identity_id, "alice", "Nope") is None
 
 
+def test_active_identity_profile_can_be_updated(store):
+    identity = store.add_identity("matt", PUBKEY_A, signer_type="nip07", label="Laptop")
+
+    updated = store.update_identity_profile(
+        identity.identity_id, "matt", signer_type="nip46", label="Phone"
+    )
+
+    assert updated is not None
+    assert updated.signer_type == "nip46"
+    assert updated.label == "Phone"
+    # ownership is enforced: another user cannot mutate the row
+    assert store.update_identity_profile(identity.identity_id, "alice", signer_type="nip46", label="x") is None
+    # a revoked identity is not profile-updated in place
+    store.revoke_identity(identity.identity_id, "matt")
+    assert store.update_identity_profile(identity.identity_id, "matt", signer_type="nip07", label="y") is None
+
+
 def test_legacy_users_table_is_migrated_once(tmp_path):
     import sqlite3
 
