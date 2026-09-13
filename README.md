@@ -20,7 +20,6 @@ Framework-free, transport-free core components:
 | `identity.relays` | NIP-65 (kind 10002) relay-list resolution over nostr-sdk's relay pool |
 | `identity.relay_cache` | sqlite-backed relay-list cache |
 | `nip05` | NIP-05 `.well-known/nostr.json` builder |
-| `web` | static `/nostr-login` `/nostr-account` `/nostr-admin` pages + JS assets (NIP-07, NIP-46, passkey) |
 
 Crypto is delegated to `nostr-sdk` (rust-nostr) exactly as the reference does;
 never accepts or stores a private key.
