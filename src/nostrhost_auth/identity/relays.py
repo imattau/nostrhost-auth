@@ -23,6 +23,8 @@ from dataclasses import dataclass
 
 from nostr_sdk import Client, Event, Filter, Kind, PublicKey, ReqTarget
 
+from nostrhost_auth._nostr_tags import tags_named
+
 RELAY_LIST_KIND = 10002
 
 
@@ -40,10 +42,7 @@ def parse_relay_list(event: Event) -> list[RelayEntry]:
     to narrow it to one.
     """
     entries: list[RelayEntry] = []
-    for tag in event.tags():
-        values = tag.to_vec()
-        if len(values) < 2 or values[0] != "r":
-            continue
+    for values in tags_named(event, "r"):
         marker = values[2] if len(values) >= 3 else None
         entries.append(RelayEntry(url=values[1], read=marker in (None, "read"), write=marker in (None, "write")))
     return entries

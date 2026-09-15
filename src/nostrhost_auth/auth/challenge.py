@@ -7,12 +7,14 @@ cannot be replayed - against this server or another YunoHost instance.
 
 from __future__ import annotations
 
-from contextlib import closing
 import secrets
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 from time import time
+
+from nostrhost_auth._sqlite import connect, connect_and_init
 
 DEFAULT_TTL_SECONDS = 90  # PLAN.md Phase 13: 30-120 second expiry
 
@@ -71,19 +73,12 @@ class ChallengeStore:
         self._pending: dict[str, Challenge] = {}
 
         if self._db_path is not None:
-            self._db_path.parent.mkdir(parents=True, exist_ok=True)
-            with closing(self._connect()) as conn:
-                conn.executescript(self.SCHEMA)
-                conn.commit()
+            connect_and_init(self._db_path, self.SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
         if self._db_path is None:
             raise RuntimeError("database connection requested for an in-memory challenge store")
-        conn = sqlite3.connect(self._db_path, timeout=5.0)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA busy_timeout = 5000")
-        conn.execute("PRAGMA journal_mode = WAL")
-        return conn
+        return connect(self._db_path)
 
     def issue(self, domain: str, action: str) -> Challenge:
         challenge = new_challenge(domain, action, self._ttl_seconds)

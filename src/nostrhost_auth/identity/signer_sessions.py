@@ -25,6 +25,8 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
+from nostrhost_auth._sqlite import connect, connect_and_init, soft_revoke_row
+
 
 @dataclass(frozen=True)
 class SignerSession:
@@ -56,15 +58,10 @@ class SignerSessionStore:
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(self._connect()) as conn:
-            conn.executescript(self.SCHEMA)
-            conn.commit()
+        connect_and_init(self._db_path, self.SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return connect(self._db_path)
 
     def register(
         self,
@@ -108,16 +105,17 @@ class SignerSessionStore:
 
     def revoke(self, session_id: str, ynh_username: str) -> bool:
         with closing(self._connect()) as conn:
-            cursor = conn.execute(
-                """
-                UPDATE signer_sessions
-                SET revoked_at = ?
-                WHERE session_id = ? AND ynh_username = ? AND revoked_at IS NULL
-                """,
-                (int(time.time()), session_id, ynh_username),
+            revoked = soft_revoke_row(
+                conn,
+                "signer_sessions",
+                id_column="session_id",
+                id_value=session_id,
+                ynh_username=ynh_username,
+                set_sql="revoked_at = ?",
+                active_sql="revoked_at IS NULL",
             )
             conn.commit()
-            return cursor.rowcount == 1
+            return revoked
 
     def touch_last_used(self, session_id: str, ynh_username: str) -> None:
         with closing(self._connect()) as conn:

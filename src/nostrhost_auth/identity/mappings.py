@@ -15,6 +15,8 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
+from nostrhost_auth._sqlite import connect, connect_and_init, soft_revoke_row
+
 
 @dataclass(frozen=True)
 class Identity:
@@ -56,15 +58,10 @@ class MappingStore:
 
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(self._connect()) as conn:
-            conn.executescript(self.SCHEMA)
-            self._migrate_legacy_users(conn)
-            conn.commit()
+        connect_and_init(self._db_path, self.SCHEMA, init=self._migrate_legacy_users)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
+        conn = connect(self._db_path)
         conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
@@ -182,23 +179,24 @@ class MappingStore:
     def revoke_identity(self, identity_id: int, ynh_username: str) -> bool:
         """Disable one identity, but only when it belongs to `ynh_username`."""
         with closing(self._connect()) as conn:
-            cursor = conn.execute(
-                """
-                UPDATE identities
-                SET enabled = 0, revoked_at = ?
-                WHERE identity_id = ? AND ynh_username = ? AND enabled = 1
-                """,
-                (int(time.time()), identity_id, ynh_username),
+            revoked = soft_revoke_row(
+                conn,
+                "identities",
+                id_column="identity_id",
+                id_value=identity_id,
+                ynh_username=ynh_username,
+                set_sql="enabled = 0, revoked_at = ?",
+                active_sql="enabled = 1",
             )
             conn.commit()
-            return cursor.rowcount == 1
+            return revoked
 
     def set_identity_enabled(self, identity_id: int, ynh_username: str, enabled: bool) -> bool:
         """Enable or re-enable one identity (used by the identity projector
         to materialise an identity-definition event's `enabled` state). Only
         touches identities belonging to `ynh_username`."""
-        with closing(self._connect()) as conn:
-            if enabled:
+        if enabled:
+            with closing(self._connect()) as conn:
                 cursor = conn.execute(
                     """
                     UPDATE identities
@@ -207,17 +205,9 @@ class MappingStore:
                     """,
                     (identity_id, ynh_username),
                 )
-            else:
-                cursor = conn.execute(
-                    """
-                    UPDATE identities
-                    SET enabled = 0, revoked_at = ?
-                    WHERE identity_id = ? AND ynh_username = ? AND enabled = 1
-                    """,
-                    (int(time.time()), identity_id, ynh_username),
-                )
-            conn.commit()
-            return cursor.rowcount == 1
+                conn.commit()
+                return cursor.rowcount == 1
+        return self.revoke_identity(identity_id, ynh_username)
 
     def get_identity_by_pubkey(self, pubkey_hex: str) -> Identity | None:
         """Like :meth:`get_by_pubkey` but ignores the enabled flag — lets the
@@ -233,19 +223,7 @@ class MappingStore:
         self, identity_id: int, ynh_username: str, label: str | None
     ) -> Identity | None:
         """Update one active identity's display label for its owning user."""
-        with closing(self._connect()) as conn:
-            cursor = conn.execute(
-                """
-                UPDATE identities
-                SET label = ?
-                WHERE identity_id = ? AND ynh_username = ? AND enabled = 1
-                """,
-                (label, identity_id, ynh_username),
-            )
-            conn.commit()
-            if cursor.rowcount != 1:
-                return None
-        return self.get_by_id(identity_id)
+        return self._update_active_identity(identity_id, ynh_username, label=label)
 
     def update_identity_profile(
         self,
@@ -262,14 +240,26 @@ class MappingStore:
         signer_type or label — the row is already materialised, so the event
         updates the profile in place rather than creating a duplicate.
         """
+        return self._update_active_identity(
+            identity_id, ynh_username, signer_type=signer_type, label=label
+        )
+
+    def _update_active_identity(self, identity_id: int, ynh_username: str, **fields: object) -> Identity | None:
+        """Shared shape behind :meth:`update_identity_label` and
+        :meth:`update_identity_profile`: update `fields` on the one active
+        identity matching `identity_id`/`ynh_username`, then refetch it.
+        Returns None (without refetching) if no such row exists - most
+        commonly because it belongs to a different user or is disabled.
+        """
+        assignments = ", ".join(f"{column} = ?" for column in fields)
         with closing(self._connect()) as conn:
             cursor = conn.execute(
-                """
+                f"""
                 UPDATE identities
-                SET signer_type = ?, label = ?
+                SET {assignments}
                 WHERE identity_id = ? AND ynh_username = ? AND enabled = 1
                 """,
-                (signer_type, label, identity_id, ynh_username),
+                (*fields.values(), identity_id, ynh_username),
             )
             conn.commit()
             if cursor.rowcount != 1:

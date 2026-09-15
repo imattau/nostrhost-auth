@@ -15,6 +15,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
 
+from nostrhost_auth._sqlite import connect, connect_and_init
 from nostrhost_auth.identity.relays import RelayEntry
 
 SCHEMA = """
@@ -49,15 +50,10 @@ def _decode(raw: str) -> list[RelayEntry]:
 class RelayCache:
     def __init__(self, db_path: Path) -> None:
         self._db_path = db_path
-        self._db_path.parent.mkdir(parents=True, exist_ok=True)
-        with closing(self._connect()) as conn:
-            conn.execute(SCHEMA)
-            conn.commit()
+        connect_and_init(self._db_path, SCHEMA)
 
     def _connect(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self._db_path)
-        conn.row_factory = sqlite3.Row
-        return conn
+        return connect(self._db_path)
 
     def get(self, pubkey_hex: str) -> CachedRelayList | None:
         with closing(self._connect()) as conn:
