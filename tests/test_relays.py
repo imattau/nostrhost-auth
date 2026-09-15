@@ -11,6 +11,7 @@ from nostrhost_auth.identity.relays import (
     fetch_relay_list,
     newest_relay_list_event,
     parse_relay_list,
+    verified_relay_list_event,
 )
 
 
@@ -56,6 +57,47 @@ def test_newest_relay_list_event_picks_the_latest():
 
 def test_newest_relay_list_event_empty_list_is_none():
     assert newest_relay_list_event([]) is None
+
+
+def test_verified_relay_list_event_rejects_forged_author():
+    """A malicious bootstrap relay can return a kind-10002 for any author;
+    only events actually signed by the requested pubkey may be used."""
+    victim = Keys.generate()
+    attacker = Keys.generate()
+    forged = _relay_list_event(attacker, [["r", "wss://evil.example"]])
+    assert verified_relay_list_event([forged], victim.public_key().to_hex()) is None
+
+
+def test_verified_relay_list_event_rejects_tampered_signature():
+    keys = Keys.generate()
+    event = _relay_list_event(keys, [["r", "wss://relay.example"]])
+    # Swap the content after signing: the id/signature no longer verify.
+    tampered = event.__class__.from_json(
+        event.as_json().replace("wss://relay.example", "wss://evil.example")
+    )
+    assert verified_relay_list_event([tampered], keys.public_key().to_hex()) is None
+
+
+def test_verified_relay_list_event_accepts_authentic():
+    keys = Keys.generate()
+    event = _relay_list_event(keys, [["r", "wss://relay.example"]])
+    assert verified_relay_list_event([event], keys.public_key().to_hex()) is event
+
+
+def test_parse_relay_list_skips_unsafe_urls():
+    keys = Keys.generate()
+    event = _relay_list_event(
+        keys,
+        [
+            ["r", "wss://relay.example"],
+            ["r", "http://plaintext.example"],
+            ["r", "ws://user:pass@relay.example"],
+            ["r", "ws://127.0.0.1:4848"],
+            ["r", "wss://10.0.0.5"],
+            ["r", "not a url"],
+        ],
+    )
+    assert parse_relay_list(event) == [RelayEntry(url="wss://relay.example", read=True, write=True)]
 
 
 @pytest.mark.asyncio
