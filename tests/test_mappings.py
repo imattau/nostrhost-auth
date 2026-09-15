@@ -6,11 +6,6 @@ PUBKEY_A = "a" * 64
 PUBKEY_B = "b" * 64
 
 
-@pytest.fixture
-def store(tmp_path):
-    return MappingStore(tmp_path / "identities.db")
-
-
 def test_link_then_lookup(store):
     store.link("matt", PUBKEY_A)
 

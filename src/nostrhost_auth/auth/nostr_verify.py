@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from nostr_sdk import Event
 
+from nostrhost_auth._nostr_tags import tags_named
+
 # Borrowed from NIP-42 ("Authentication of clients to relays"), which
 # already establishes the convention of a client signing a throwaway event
 # purely to prove control of a pubkey over a server-issued challenge. Our
@@ -45,11 +47,7 @@ def parse_and_verify_event(event_json: str) -> Event:
 
 
 def _tag_value(event: Event, name: str) -> str | None:
-    for tag in event.tags():
-        values = tag.to_vec()
-        if len(values) >= 2 and values[0] == name:
-            return values[1]
-    return None
+    return next((values[1] for values in tags_named(event, name)), None)
 
 
 def extract_tag_from_raw_event(event: dict, name: str) -> str | None:
